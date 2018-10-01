@@ -1,7 +1,4 @@
 #!/bin/bash
-STACK_NAME=$1
-BACKUP_DIR=${2:-${HOME}/backup}
-
 help()
 {
     echo "dockup is script which purpose is to backup docker swarm volumes"
@@ -10,33 +7,52 @@ help()
     echo "STACK_NAME - name of docker swarm stack - all volumes from this stack will be taken and put into BACKUP_DIR"
     echo "BACKUP_DIR - absolute path to directory where backups should be stored"
     echo "backup file format is \$\(STACK_NAME\)_backup.tar"
-    echo "-m MACHINE_NAME - will take it from docker-machine"    
+    echo "-m MACHINE_NAME - will take it from docker-machine"
 }
 
 
 tar_volume()
 {
-    CONTAINER_ID=$1
-    DIR_TO_BACKUP=$2
-    BACKUP_NAME=$3
+    local CONTAINER_ID=$1
+    local DIR_TO_BACKUP=$2
+    local BACKUP_NAME=$3
     docker run --rm --volumes-from ${CONTAINER_ID} -v ${BACKUP_DIR}:/backup:rw ubuntu tar cf /backup/${BACKUP_NAME}_backup.tar ${DIR_TO_BACKUP}
+}
+
+backup_volume()
+{
+    local DIR_TO_BACKUP=$1
+    local VOLUME_ID=$2
+
+    local CONTAINER_ID=$(get_container_id_from_task_id ${TASK_ID})
+    tar_volume $CONTAINER_ID $DIR_TO_BACKUP $VOLUME_NAME
+}
+
+backup_tasks_volumes()
+{
+    local TASK_ID=$1
+    echo "TASK_ID: ${TASK_ID}"
+    local DIR_VOLUMES=$(get_volumes_from_task ${TASK_ID})
+    for (( i=0; i<${#DIR_VOLUMES[@]} ; i+=2 )); do
+	backup_volume "${DIR_VOLUMES[i]}" "${DIR_VOLUMES[i+1]}"
+    done
 }
 
 
 backup()
 {
     for TASK_ID in $(get_tasks_from_stack ${STACK_NAME} ) ; do
-	echo "TASK_ID: ${TASK_ID}"
-	DIR_VOLUMES=$(get_volumes_from_task ${TASK_ID})
-	for (( i=0; i<${#DIR_VOLUMES[@]} ; i+=2 )); do
-	    DIR_TO_BACKUP="${DIR_VOLUMES[i]}"
-	    VOLUME_ID="${DIR_VOLUMES[i+1]}"
-	    local CONTAINER_ID=$(get_container_id_from_task_id ${TASK_ID})
-	    tar_volume $CONTAINER_ID $DIR_TO_BACKUP $VOLUME_NAME
-	done
+	backup_tasks_volumes $TASK_ID
     done
 }
 
+backup_from_docker_machine()
+{
+    local MACHINE_NAME=$1
+    eval $(docker-machine env $MACHINE_NAME)
+    mkdir -p $BACKUP_DIR
+    docker-machine scp "${MACHINE_NAME}:${BACKUP_DIR}/*" $BACKUP_DIR/
+}
 
 get_volumes_from_task()
 {
@@ -55,19 +71,36 @@ get_container_id_from_task_id()
     docker inspect -f "{{.Status.ContainerStatus.ContainerID}}" $TASK_ID
 }
 
+main()
+{
+    STACK_NAME=$1
+    shift
+    set -x
 
-backup
+    DOCKER_BACKUP_COMMAND="backup"
+    POSITIONAL=()
+    while [[ $# -gt 0 ]]
+    do
+	key="$1"
 
-#export STACK_NAME_ID=$(get_containers_id $STACK_NAME)
-#get_volumes_list $STACK_NAME | xargs -l bash -c 'backup ${STACK_NAME} ${BACKUP_DIR} $0 $1' >  ${BACKUP_DIR}/${BACKUP_NAME}_backup.tar
+	case $key in
+	    -m|--machine)
+		local MACHINE_NAME="$2"
+		shift # past argument
+		shift # past value
+		DOCKER_BACKUP_COMMAND="backup_from_docker_machine ${MACHINE_NAME}"
+		;;
+	    *)    # unknown option
+		POSITIONAL+=("$1") # save it in an array for later
+		shift # past argument
+		;;
+	esac
+    done
+    set -- "${POSITIONAL[@]}" # restore positional parameters
+    echo $1
+    BACKUP_DIR=${1:-${HOME}/backup}
 
-# get_volumes_list()
-# {
-#     docker service inspect $1 -f '{{range .Spec.TaskTemplate.ContainerSpec.Mounts}}{{println .Target .Source}}{{end}}'
-# }
+    $DOCKER_BACKUP_COMMAND $1
+}
 
-
-# get_containers_id()
-# {
-#     docker service inspect $1 -f '{{ .ID }}'
-# }
+main $@
