@@ -41,6 +41,7 @@ backup_tasks_volumes()
 
 backup()
 {
+    local STACK_NAME=$1
     for TASK_ID in $(get_tasks_from_stack ${STACK_NAME} ) ; do
 	backup_tasks_volumes $TASK_ID
     done
@@ -49,7 +50,9 @@ backup()
 backup_from_docker_machine()
 {
     local MACHINE_NAME=$1
+    local STACK_NAME=$2
     eval $(docker-machine env $MACHINE_NAME)
+    backup ${STACK_NAME}
     mkdir -p $BACKUP_DIR
     docker-machine scp "${MACHINE_NAME}:${BACKUP_DIR}/*" $BACKUP_DIR/
 }
@@ -73,12 +76,9 @@ get_container_id_from_task_id()
 
 main()
 {
-    STACK_NAME=$1
-    shift
     set -x
-
-    DOCKER_BACKUP_COMMAND="backup"
-    POSITIONAL=()
+    local DOCKER_BACKUP_COMMAND="backup"
+    local POSITIONAL=()
     while [[ $# -gt 0 ]]
     do
 	key="$1"
@@ -90,6 +90,10 @@ main()
 		shift # past value
 		DOCKER_BACKUP_COMMAND="backup_from_docker_machine ${MACHINE_NAME}"
 		;;
+	    -h|--help)
+		help
+		exit 0
+		;;
 	    *)    # unknown option
 		POSITIONAL+=("$1") # save it in an array for later
 		shift # past argument
@@ -97,10 +101,10 @@ main()
 	esac
     done
     set -- "${POSITIONAL[@]}" # restore positional parameters
-    echo $1
-    BACKUP_DIR=${1:-${HOME}/backup}
+    local STACK_NAME=$1
+    local BACKUP_DIR=${2:-${HOME}/backup}
 
-    $DOCKER_BACKUP_COMMAND $1
+    $DOCKER_BACKUP_COMMAND $1 $2
 }
 
 main $@
