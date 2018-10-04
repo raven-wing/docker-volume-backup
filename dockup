@@ -1,13 +1,15 @@
 #!/bin/bash
-help()
+prompt()
 {
+    echo ""
+    echo "Usage: dockup STACK_NAME [BACKUP_DIR] [-m MACHINE_NAME]"
+    echo ""
     echo "dockup is script which purpose is to backup docker swarm volumes"
     echo "This script takes up to 2 arguments:"
-    echo "dockup STACK_NAME [BACKUP_DIR]"
-    echo "STACK_NAME - name of docker swarm stack - all volumes from this stack will be taken and put into BACKUP_DIR"
-    echo "BACKUP_DIR - absolute path to directory where backups should be stored"
-    echo "backup file format is \$\(STACK_NAME\)_backup.tar"
-    echo "-m MACHINE_NAME - will take it from docker-machine"
+    printf "\tSTACK_NAME - name of docker swarm stack - all volumes from this stack will be taken and put into BACKUP_DIR\n"
+    printf "\tBACKUP_DIR - absolute path to directory where backups should be stored\n"
+    printf "\t-m MACHINE_NAME - will take it from docker-machine\n"
+    printf "\nbackup file format is \$\(STACK_NAME\)_backup.tar\n"
 }
 
 
@@ -65,18 +67,17 @@ get_volumes_from_task()
 get_tasks_from_stack()
 {
     local STACK_NAME=$1
-    docker stack ps $STACK_NAME --no-trunc --filter "desired-state=Running" -q
+    docker stack ps $STACK_NAME --no-trunc --filter "desired-state=Running" -q || exit -1
 }
 
 get_container_id_from_task_id()
 {
     local TASK_ID=$1
-    docker inspect -f "{{.Status.ContainerStatus.ContainerID}}" $TASK_ID
+    docker inspect -f "{{.Status.ContainerStatus.ContainerID}}" $TASK_ID || exit -1
 }
 
 main()
 {
-    set -x
     local DOCKER_BACKUP_COMMAND="backup"
     local POSITIONAL=()
     while [[ $# -gt 0 ]]
@@ -91,7 +92,7 @@ main()
 		DOCKER_BACKUP_COMMAND="backup_from_docker_machine ${MACHINE_NAME}"
 		;;
 	    -h|--help)
-		help
+		prompt
 		exit 0
 		;;
 	    *)    # unknown option
@@ -100,7 +101,10 @@ main()
 		;;
 	esac
     done
+    set -x
     set -- "${POSITIONAL[@]}" # restore positional parameters
+    # check whether at least one argument is there
+    [[ $# -lt 1 ]] && echo "stack name was not provided" && prompt && exit -1
     local STACK_NAME=$1
     local BACKUP_DIR=${2:-${HOME}/backup}
 
