@@ -18,7 +18,7 @@ tar_volume()
     local CONTAINER_ID=$1
     local DIR_TO_BACKUP=$2
     local BACKUP_NAME=$3
-    docker run --rm --volumes-from ${CONTAINER_ID} -v ${BACKUP_DIR}:/backup:rw ubuntu tar cf /backup/${BACKUP_NAME}_backup.tar ${DIR_TO_BACKUP}
+    docker run --rm --volumes-from ${CONTAINER_ID} -v ${BACKUP_DIR}:/backup:rw ubuntu tar cf /backup/${BACKUP_NAME}_backup.tar -C ${DIR_TO_BACKUP}
 }
 
 backup_volume()
@@ -36,20 +36,19 @@ backup_tasks_volumes()
     echo "TASK_ID: ${TASK_ID}"
     local DIR_VOLUMES=$(get_volumes_from_task ${TASK_ID})
     for (( i=0; i<${#DIR_VOLUMES[@]} ; i+=2 )); do
-	backup_volume "${DIR_VOLUMES[i]}" "${DIR_VOLUMES[i+1]}"
+        backup_volume "${DIR_VOLUMES[i]}" "${DIR_VOLUMES[i+1]}"
     done
 }
-
 
 backup()
 {
     local STACK_NAME=$1
     for TASK_ID in $(get_tasks_from_stack ${STACK_NAME} ) ; do
-	backup_tasks_volumes $TASK_ID
+        backup_tasks_volumes $TASK_ID
     done
 }
 
-backup_from_docker_machine()
+backup_docker_machine_volumes()
 {
     local MACHINE_NAME=$1
     local STACK_NAME=$2
@@ -57,6 +56,58 @@ backup_from_docker_machine()
     backup ${STACK_NAME}
     mkdir -p $BACKUP_DIR
     docker-machine scp "${MACHINE_NAME}:${BACKUP_DIR}/*" $BACKUP_DIR/
+}
+
+untar_volume()
+{
+    local CONTAINER_ID=$1
+    local DIR_TO_BACKUP=$2
+    local BACKUP_NAME=$3
+    echo "dupa"
+    echo $CONTAINER_ID
+    echo $DIR_TO_BACKUP
+    echo $BACKUP_NAME
+#    docker run --rm --volumes-from ${CONTAINER_ID} -v ${BACKUP_DIR}:/backup:rw ubuntu tar -xf /backup/${BACKUP_NAME}_backup.tar  --transform='s,${DIR_TO_BACKUP},,g' -C ${DIR_TO_BACKUP}
+#    docker run --rm --volumes-from ${CONTAINER_ID} -v ${BACKUP_DIR}:/backup:rw ubuntu find ${DIR_TO_BACKUP}
+   
+}
+
+restore_volume()
+{
+    local DIR_TO_BACKUP=$1
+    local VOLUME_ID=$2
+    local CONTAINER_ID=$(get_container_id_from_task_id ${TASK_ID})
+    untar_volume $CONTAINER_ID $DIR_TO_BACKUP $VOLUME_NAME
+}
+
+restore_tasks_volumes()
+{
+    set -x
+    local TASK_ID=$1
+    echo "TASK_ID: ${TASK_ID}"
+    local DIR_VOLUMES=$(get_volumes_from_task ${TASK_ID})
+    for (( i=0; i<${#DIR_VOLUMES[@]} ; i+=2 )); do
+        restore_volume "${DIR_VOLUMES[i]}" "${DIR_VOLUMES[i+1]}"
+    done
+    set +x
+}
+
+restore()
+{
+    local STACK_NAME=$1
+    for TASK_ID in $(get_tasks_from_stack ${STACK_NAME} ) ; do
+        restore_tasks_volumes $TASK_ID
+    done
+}
+
+restore_docker_machine_volumes()
+{
+    local MACHINE_NAME=$1
+    local STACK_NAME=$2
+    eval $(docker-machine env $MACHINE_NAME)
+    docker-machine scp -r $BACKUP_DIR/. "${MACHINE_NAME}:/tmp/backup_dir"
+    docker-machine ssh "${MACHINE_NAME}" sudo mv "/tmp/backup_dir/*" "${BACKUP_DIR}"
+    restore ${STACK_NAME}
 }
 
 get_volumes_from_task()
@@ -78,37 +129,41 @@ get_container_id_from_task_id()
 
 main()
 {
-    local DOCKER_BACKUP_COMMAND="backup"
+    local BASE_COMMAND="backup"
     local POSITIONAL=()
     while [[ $# -gt 0 ]]
     do
-	key="$1"
+        key="$1"
 
-	case $key in
-	    -m|--machine)
-		local MACHINE_NAME="$2"
-		shift # past argument
-		shift # past value
-		DOCKER_BACKUP_COMMAND="backup_from_docker_machine ${MACHINE_NAME}"
-		;;
-	    -h|--help)
-		prompt
-		exit 0
-		;;
-	    *)    # unknown option
-		POSITIONAL+=("$1") # save it in an array for later
-		shift # past argument
-		;;
-	esac
+        case $key in
+            -m|--machine)
+                local MACHINE_NAME="$2"
+                shift # past argument
+                shift # past value
+                COMMAND_POSTFIX="docker_machine_volumes ${MACHINE_NAME}"
+                ;;
+            -h|--help)
+                prompt
+                exit 0
+                ;;
+            -r|--restore)
+                BASE_COMMAND="restore"
+		shift
+                ;;
+            *)    # unknown option
+                POSITIONAL+=("$1") # save it in an array for later
+                shift # past argument
+                ;;
+        esac
     done
-    set -x
     set -- "${POSITIONAL[@]}" # restore positional parameters
     # check whether at least one argument is there
     [[ $# -lt 1 ]] && echo "stack name was not provided" && prompt && exit -1
     local STACK_NAME=$1
     local BACKUP_DIR=${2:-${HOME}/backup}
 
-    $DOCKER_BACKUP_COMMAND $1 $2
+    COMMAND="${BASE_COMMAND}_${COMMAND_POSTFIX}"
+    $COMMAND ${STACK_NAME} ${BACKUP_DIR}
 }
 
 main $@
