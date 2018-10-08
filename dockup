@@ -9,7 +9,7 @@ prompt()
     printf "\tSTACK_NAME - name of docker swarm stack - all volumes from this stack will be taken and put into BACKUP_DIR\n"
     printf "\tBACKUP_DIR - absolute path to directory where backups should be stored\n"
     printf "\t-m MACHINE_NAME - will take it from docker-machine\n"
-    printf "\nbackup file format is \$\(STACK_NAME\)_backup.tar\n"
+    printf "\nbackup file format is \$\(STACK_NAME\)_backup.dbcp\n which is simple .tar file"
 }
 
 
@@ -18,7 +18,7 @@ tar_volume()
     local CONTAINER_ID=$1
     local DIR_TO_BACKUP=$2
     local BACKUP_NAME=$3
-    docker run --rm --volumes-from ${CONTAINER_ID} -v ${BACKUP_DIR}:/backup:rw ubuntu tar cf /backup/${BACKUP_NAME}_backup.tar -C ${DIR_TO_BACKUP}
+    docker run --rm --volumes-from ${CONTAINER_ID} -v ${BACKUP_DIR}:/backup:rw ubuntu tar cf /backup/${BACKUP_NAME}_backup.dbcp -C ${DIR_TO_BACKUP} .
 }
 
 backup_volume()
@@ -63,13 +63,7 @@ untar_volume()
     local CONTAINER_ID=$1
     local DIR_TO_BACKUP=$2
     local BACKUP_NAME=$3
-    echo "dupa"
-    echo $CONTAINER_ID
-    echo $DIR_TO_BACKUP
-    echo $BACKUP_NAME
-#    docker run --rm --volumes-from ${CONTAINER_ID} -v ${BACKUP_DIR}:/backup:rw ubuntu tar -xf /backup/${BACKUP_NAME}_backup.tar  --transform='s,${DIR_TO_BACKUP},,g' -C ${DIR_TO_BACKUP}
-#    docker run --rm --volumes-from ${CONTAINER_ID} -v ${BACKUP_DIR}:/backup:rw ubuntu find ${DIR_TO_BACKUP}
-   
+    docker run --rm --volumes-from ${CONTAINER_ID} -v ${BACKUP_DIR}:/backup:rw ubuntu tar -xf /backup/${BACKUP_NAME}_backup.dbcp -C ${DIR_TO_BACKUP}
 }
 
 restore_volume()
@@ -82,14 +76,12 @@ restore_volume()
 
 restore_tasks_volumes()
 {
-    set -x
     local TASK_ID=$1
     echo "TASK_ID: ${TASK_ID}"
     local DIR_VOLUMES=$(get_volumes_from_task ${TASK_ID})
     for (( i=0; i<${#DIR_VOLUMES[@]} ; i+=2 )); do
         restore_volume "${DIR_VOLUMES[i]}" "${DIR_VOLUMES[i+1]}"
     done
-    set +x
 }
 
 restore()
